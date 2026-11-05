@@ -6,6 +6,7 @@ import { DevOverlay } from './ui/DevOverlay';
 import { HowTo } from './ui/HowTo';
 import { Hud } from './ui/Hud';
 import { Landing } from './ui/Landing';
+import { NetSession } from './net/NetSession';
 
 document.title = CAVE_TITLE;
 
@@ -22,6 +23,8 @@ class App {
   private readonly landing: Landing;
   private readonly hud: Hud;
   private readonly game: Game;
+  private net: NetSession | null = null;
+  private readonly offline = new URLSearchParams(location.search).has('offline');
 
   constructor() {
     const ui = byId<HTMLDivElement>('ui');
@@ -52,23 +55,60 @@ class App {
   }
 
   private async askName(message = ''): Promise<void> {
-    const name = await this.landing.ask(message);
-    this.sound.unlock();
-    this.enter(name);
+    for (;;) {
+      const name = await this.landing.ask(message);
+      this.sound.unlock();
+      this.landing.setBusy(true);
+      try {
+        await this.enter(name);
+        return;
+      } catch (err) {
+        console.warn('[app] join failed', err);
+        message = joinErrorMessage(err);
+      }
+    }
   }
 
-  private enter(name: string): void {
-    this.game.spawnLocal('local', name, Math.floor(Math.random() * LOOK_COUNT));
+  private async enter(name: string): Promise<void> {
+    if (this.offline) {
+      this.game.spawnLocal('local', name, Math.floor(Math.random() * LOOK_COUNT));
+    } else {
+      this.net = await NetSession.connect(name, this.game, {
+        onCount: (n) => this.hud.setCount(n),
+        onStatus: (text) => this.hud.setStatus(text),
+        onDisconnected: (reason) => this.backToLanding(reason),
+        onChat: () => undefined,
+        onHistory: () => undefined,
+        onNotice: (n) => this.hud.toast(n.text),
+        onPing: (ms) =>
+          (this.dev.ping = this.dev.ping === null ? ms : this.dev.ping * 0.7 + ms * 0.3),
+      });
+    }
     this.landing.hide();
     this.hud.show();
-    this.hud.setCount(this.game.avatars.size);
+    this.hud.setCount(Math.max(1, this.game.avatars.size));
   }
 
   private leave(): void {
-    this.game.reset();
-    this.hud.hide();
-    void this.askName();
+    void this.net?.leave();
+    this.backToLanding('');
   }
+
+  private backToLanding(message: string): void {
+    this.net = null;
+    this.dev.ping = null;
+    this.game.reset();
+    this.hud.setStatus('');
+    this.hud.hide();
+    void this.askName(message);
+  }
+}
+
+function joinErrorMessage(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/nickname/i.test(msg)) return msg;
+  if (/full|locked/i.test(msg)) return 'The cave is packed — try again in a moment.';
+  return "Couldn't reach the cave. Check your connection and try again.";
 }
 
 new App();

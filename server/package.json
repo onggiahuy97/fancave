@@ -1,0 +1,26 @@
+{
+  "name": "@fancave/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.cjs",
+    "build": "node build.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "loadtest": "tsx loadtest/bots.ts"
+  },
+  "dependencies": {
+    "@colyseus/schema": "2.0.37",
+    "@colyseus/ws-transport": "0.15.3",
+    "colyseus": "0.15.57"
+  },
+  "devDependencies": {
+    "@fancave/shared": "workspace:*",
+    "colyseus.js": "0.15.28",
+    "esbuild": "0.24.2",
+    "tsx": "4.19.2",
+    "vitest": "2.1.9"
+  }
+}
