@@ -61,6 +61,9 @@ class App {
     this.landing = new Landing(() => this.howTo.show());
     ui.append(this.hud.root, this.dev.root, this.landing.root, this.howTo.root);
     void this.askName();
+    // Test/debug hook (dev builds only).
+    if (import.meta.env.DEV)
+      (window as unknown as { __fancave: unknown }).__fancave = { game: this.game };
   }
 
   private async askName(message = ''): Promise<void> {

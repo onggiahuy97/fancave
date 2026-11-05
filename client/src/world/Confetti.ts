@@ -21,7 +21,7 @@ export class Confetti {
     for (let i = 0; i < MAX; i++) this.pos[i * 3 + 1] = -100;
     this.points = new THREE.Points(
       geo,
-      new THREE.PointsMaterial({ size: 0.09, vertexColors: true, transparent: true }),
+      new THREE.PointsMaterial({ size: 0.07, vertexColors: true, transparent: true }),
     );
     this.points.frustumCulled = false;
   }

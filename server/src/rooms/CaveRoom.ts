@@ -1,6 +1,6 @@
 import type { Client } from 'colyseus';
 import { Room, ServerError } from 'colyseus';
-import type { ChatEntry, JoinOptions, PingMsg, WelcomeMsg } from '@fancave/shared';
+import type { ChatEntry, JoinOptions, PingMsg, Placed, WelcomeMsg } from '@fancave/shared';
 import {
   C2S,
   LOOK_COUNT,
@@ -12,6 +12,7 @@ import {
   sanitizeNickname,
 } from '@fancave/shared';
 import { ChatLog, moderateChat } from '../features/chat';
+import { nearbyRecipients, resolveEmote } from '../features/emotes';
 import { applyInputBatch } from '../features/movement';
 import { textFilter } from '../moderation/profanity';
 import { CaveState, Player } from './CaveState';
@@ -75,8 +76,30 @@ export class CaveRoom extends Room<CaveState> {
       });
     });
 
+    this.onMessage(C2S.Emote, (client, msg: unknown) => {
+      const player = this.state.players.get(client.sessionId);
+      const session = this.sessions.get(client.sessionId);
+      if (!player || !session || !player.online) return;
+      const everyone = this.placedPlayers();
+      const actor = { id: client.sessionId, x: player.x, z: player.z, ry: player.ry };
+      const online = everyone.filter((p) => this.state.players.get(p.id)?.online);
+      const d = resolveEmote(msg, actor, online, session.emotes, Date.now());
+      if (!d.ok) {
+        if (d.notice) client.send(S2C.Notice, d.notice);
+        return;
+      }
+      const to = nearbyRecipients(player.x, player.z, everyone);
+      for (const c of this.clients) if (to.has(c.sessionId)) c.send(S2C.Emote, d.event);
+    });
+
     // Ignore unknown message types quietly instead of logging per message.
     this.onMessage('*', () => undefined);
+  }
+
+  private placedPlayers(): Placed[] {
+    const out: Placed[] = [];
+    this.state.players.forEach((p, id) => out.push({ id, x: p.x, z: p.z, ry: p.ry }));
+    return out;
   }
 
   protected welcomeHistory(): WelcomeMsg['history'] {

@@ -166,8 +166,8 @@ export class Avatar {
       // Knockback direction in the character's frame: forward component -> lean, side -> roll.
       const fwd = this.stagger.dx * fx + this.stagger.dz * fz;
       const side = this.stagger.dx * fz - this.stagger.dz * fx;
-      p.lean += fwd * 0.6 * c;
-      p.roll += side * 0.5 * c;
+      p.lean += fwd * 0.42 * c;
+      p.roll += side * 0.38 * c;
       p.armRaiseL += 0.9 * c;
       p.armRaiseR += 0.9 * c;
       p.headTilt -= 0.3 * c;
