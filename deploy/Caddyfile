@@ -1,0 +1,43 @@
+# SITE_ADDRESS is your domain (e.g. cave.example.com). Caddy obtains and renews the
+# Let's Encrypt certificate automatically. Use ":80" for plain HTTP (local testing).
+{$SITE_ADDRESS:localhost} {
+	encode zstd gzip
+
+	# Game server: Colyseus matchmaking (HTTP) + room connections (WebSocket).
+	# reverse_proxy upgrades WebSockets automatically.
+	handle_path /colyseus/* {
+		reverse_proxy server:2567 {
+			# Long-lived sockets: don't cut them on config reloads.
+			stream_close_delay 5m
+		}
+	}
+
+	handle /healthz {
+		rewrite * /health
+		reverse_proxy server:2567
+	}
+
+	# Static client (Vite build) with SPA fallback.
+	handle {
+		root * /srv
+		@hashed path /assets/*
+		header @hashed Cache-Control "public, max-age=31536000, immutable"
+		@html path / /index.html
+		header @html Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		X-Frame-Options SAMEORIGIN
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
