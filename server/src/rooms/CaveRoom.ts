@@ -1,6 +1,6 @@
 import type { Client } from 'colyseus';
 import { Room, ServerError } from 'colyseus';
-import type { JoinOptions, PingMsg, WelcomeMsg } from '@fancave/shared';
+import type { ChatEntry, JoinOptions, PingMsg, WelcomeMsg } from '@fancave/shared';
 import {
   C2S,
   LOOK_COUNT,
@@ -11,7 +11,9 @@ import {
   randomSpawn,
   sanitizeNickname,
 } from '@fancave/shared';
+import { ChatLog, moderateChat } from '../features/chat';
 import { applyInputBatch } from '../features/movement';
+import { textFilter } from '../moderation/profanity';
 import { CaveState, Player } from './CaveState';
 import { PlayerSession } from './PlayerSession';
 
@@ -30,6 +32,7 @@ export interface AuthData {
 export class CaveRoom extends Room<CaveState> {
   override maxClients = MAX_PLAYERS;
   readonly sessions = new Map<string, PlayerSession>();
+  readonly chatLog = new ChatLog();
 
   override onCreate(): void {
     this.setState(new CaveState());
@@ -55,13 +58,37 @@ export class CaveRoom extends Room<CaveState> {
       } satisfies WelcomeMsg);
     });
 
+    this.onMessage(C2S.Chat, (client, msg: unknown) => {
+      const player = this.state.players.get(client.sessionId);
+      const session = this.sessions.get(client.sessionId);
+      if (!player || !session) return;
+      const d = moderateChat(msg, session.chat, Date.now(), textFilter());
+      if (!d.ok) {
+        if (d.notice) client.send(S2C.Notice, d.notice);
+        return;
+      }
+      this.broadcastChat({
+        from: client.sessionId,
+        name: player.name,
+        text: d.text,
+        t: Date.now(),
+      });
+    });
+
     // Ignore unknown message types quietly instead of logging per message.
     this.onMessage('*', () => undefined);
   }
 
-  /** Chat history handed to new joiners (overridden once chat is registered). */
   protected welcomeHistory(): WelcomeMsg['history'] {
-    return [];
+    return this.chatLog.recent();
+  }
+
+  broadcastChat(entry: Omit<ChatEntry, 'id'>): void {
+    this.broadcast(S2C.Chat, this.chatLog.add(entry));
+  }
+
+  private system(text: string): void {
+    this.broadcastChat({ from: '', name: '', text, t: Date.now(), system: true });
   }
 
   override onAuth(_client: Client, options: Partial<JoinOptions> | undefined): AuthData {
@@ -82,6 +109,7 @@ export class CaveRoom extends Room<CaveState> {
     p.look = Math.floor(Math.random() * LOOK_COUNT);
     this.state.players.set(client.sessionId, p);
     this.sessions.set(client.sessionId, new PlayerSession(Date.now()));
+    this.system(`${auth.name} entered the cave`);
   }
 
   override async onLeave(client: Client, consented: boolean): Promise<void> {
@@ -92,8 +120,8 @@ export class CaveRoom extends Room<CaveState> {
       try {
         // Keep the avatar for a few seconds so a flaky connection can resume.
         await this.allowReconnection(client, RECONNECT_WINDOW_S);
+        // Keep the existing session so rate limits / cooldowns survive a reconnect.
         player.online = true;
-        this.sessions.set(client.sessionId, new PlayerSession(Date.now()));
         return;
       } catch {
         // Window expired: fall through to cleanup.
@@ -103,6 +131,8 @@ export class CaveRoom extends Room<CaveState> {
   }
 
   protected removePlayer(sessionId: string): void {
+    const p = this.state.players.get(sessionId);
+    if (p) this.system(`${p.name} left`);
     this.state.players.delete(sessionId);
     this.sessions.delete(sessionId);
   }

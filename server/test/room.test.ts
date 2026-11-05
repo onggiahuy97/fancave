@@ -4,8 +4,8 @@ import { Server } from 'colyseus';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import type { Room } from 'colyseus.js';
 import { Client } from 'colyseus.js';
-import type { PlayerState } from '@fancave/shared';
-import { C2S, MAX_PLAYERS, RECONNECT_WINDOW_S, ROOM_NAME } from '@fancave/shared';
+import type { ChatEntry, NoticeMsg, PlayerState, WelcomeMsg } from '@fancave/shared';
+import { C2S, MAX_PLAYERS, RECONNECT_WINDOW_S, ROOM_NAME, S2C } from '@fancave/shared';
 import { CaveRoom } from '../src/rooms/CaveRoom';
 
 const PORT = 2700 + Math.floor(Math.random() * 200);
@@ -117,4 +117,30 @@ describe('CaveRoom', () => {
     expect(extra.roomId).not.toBe(full);
     await Promise.all([...rooms, extra].map((r) => r.leave()));
   }, 30_000);
+
+  it('broadcasts chat, rate limits spam and replays history to late joiners', async () => {
+    const a = await client().joinOrCreate<State>(ROOM_NAME, { name: 'Talker' });
+    const b = await client().joinOrCreate<State>(ROOM_NAME, { name: 'Listener' });
+    const heard: ChatEntry[] = [];
+    const notices: NoticeMsg[] = [];
+    b.onMessage(S2C.Chat, (m: ChatEntry) => heard.push(m));
+    a.onMessage(S2C.Chat, () => undefined);
+    a.onMessage(S2C.Notice, (m: NoticeMsg) => notices.push(m));
+    a.send(C2S.Chat, { text: '  come on   you reds  ' });
+    a.send(C2S.Chat, { text: 'spam' });
+    await until(() => heard.some((m) => !m.system) && notices.length > 0);
+    const said = heard.filter((m) => !m.system);
+    expect(said).toHaveLength(1);
+    expect(said[0]).toMatchObject({ from: a.sessionId, name: 'Talker', text: 'come on you reds' });
+    expect(notices[0]?.kind).toBe('chat-rate');
+
+    const late = await client().joinOrCreate<State>(ROOM_NAME, { name: 'Latecomer' });
+    let welcome: WelcomeMsg | null = null;
+    late.onMessage(S2C.Welcome, (m: WelcomeMsg) => (welcome = m));
+    late.onMessage(S2C.Chat, () => undefined);
+    late.send(C2S.Hello);
+    await until(() => welcome !== null);
+    expect(welcome!.history.some((m) => m.text === 'come on you reds')).toBe(true);
+    await Promise.all([a.leave(), b.leave(), late.leave()]);
+  });
 });
